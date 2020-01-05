@@ -1,0 +1,27 @@
+{
+  "private": true,
+  "name": "ai-data-miner",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "clean": "npx rimraf dist",
+    "start": "node ./src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ArturJS/ai-data-miner.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ArturJS/ai-data-miner/issues"
+  },
+  "homepage": "https://github.com/ArturJS/ai-data-miner#readme",
+  "dependencies": {
+    "csv-write-stream": "^2.0.0",
+    "puppeteer": "^2.0.0"
+  }
+}
