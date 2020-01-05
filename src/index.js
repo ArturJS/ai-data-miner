@@ -89,8 +89,6 @@ const saveProductData = async ({ go, productId, csvStream }) => {
 };
 
 const main = async () => {
-    mkdirp.sync('images');
-
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
     const go = async url => {
@@ -114,7 +112,7 @@ const main = async () => {
     console.dir(productIds);
 
     const csvStream = csvWriter();
-    await mkdirp('./dist');
+    await mkdirp('./dist/images');
     csvStream.pipe(fs.createWriteStream('./dist/products_data.csv'));
     console.log('Tring to save each product data...');
 

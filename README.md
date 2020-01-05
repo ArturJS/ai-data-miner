@@ -16,3 +16,4 @@ There will available the next data: `product_data.csv` and `images` folder with 
 2. Save big resolution product preview images
 3. Add support for Docker run
 4. Add ability to configure `url` and page selectors from `process.argv`
+5. Add progress bar
