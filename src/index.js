@@ -1,8 +1,9 @@
 const fs = require('fs');
+const { promisify } = require('util');
+const mkdirp = promisify(require('mkdirp'));
 const puppeteer = require('puppeteer');
 const csvWriter = require('csv-write-stream');
 
-const writer = csvWriter();
 // todo use config for baseUrl
 
 const catchPossibleError = async fn => {
@@ -17,7 +18,7 @@ const catchPossibleError = async fn => {
 
 const getTextContent = async ({ page, element }) => {
     const text = await page.evaluate(element => element.textContent, element);
-
+    console.log('Text content: ' + text);
     return text;
 };
 
@@ -28,7 +29,9 @@ const $ = {
     description: 'span.h3 + div'
 };
 
-const getNextProduct = async ({ go, productId, csvStream }) => {
+const saveProductData = async ({ go, productId, csvStream }) => {
+    console.log(`Opening product page ${productId}`);
+
     const page = await go(
         `https://www.citilink.ru/catalog/mobile/cell_phones/${productId}`
     );
@@ -38,25 +41,34 @@ const getNextProduct = async ({ go, productId, csvStream }) => {
             timeout: 7000
         });
 
-        const elements = await page.$$(productPreviewsSelector);
+        const elements = await page.$$($.productPreviews);
         let previewNumber = 0;
 
         for (let element of elements) {
             previewNumber++;
+            console.log(
+                `Saving product preview ${JSON.stringify({
+                    productId,
+                    previewNumber
+                })}`
+            );
+            const productFolderPath = `./dist/images/${productId}/`;
+            await mkdirp(productFolderPath);
             await element.screenshot({
-                path: `./images/${productId}/${previewNumber}.png`
+                // todo save big resolution picture
+                path: `${productFolderPath}/${previewNumber}.png`
             });
         }
     };
 
     const getProductInfo = async () => {
         const getText = async selector =>
-            await getTextContent({ page, element: page.$(selector) });
+            await getTextContent({ page, element: await page.$(selector) });
 
         return {
-            title: getText($.title),
-            characteristics: getText($.characteristics),
-            description: getText($.description)
+            title: await getText($.title),
+            characteristics: await getText($.characteristics),
+            description: await getText($.description)
         };
     };
 
@@ -71,10 +83,14 @@ const getNextProduct = async ({ go, productId, csvStream }) => {
         };
     });
 
+    console.log(`Saving productData to csv file:`);
+    console.dir(productData);
     csvStream.write(productData);
 };
 
 const main = async () => {
+    mkdirp.sync('images');
+
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
     const go = async url => {
@@ -83,27 +99,31 @@ const main = async () => {
         return page;
     };
 
-    await go('https://www.citilink.ru/catalog/mobile/cell_phones/');
+    const baseUrl = 'https://www.citilink.ru/catalog/mobile/cell_phones/';
 
-    const links = await page.evaluate(`
+    console.log(`Navigating to ${baseUrl}`);
+    await go(baseUrl);
+
+    console.log(`Trying to get productIds...`);
+    const productIds = await page.evaluate(`
     [...document.querySelectorAll('.block_data__gtm-js a[data-product-id]')]
-      .map((element) => ({
-        productId: element.getAttribute('data-product-id'),
-        url: element.getAttribute('href')
-      }));
+      .map((element) => element.getAttribute('data-product-id'));
     `);
 
-    console.dir(links);
+    console.log('ProductIds received:');
+    console.dir(productIds);
 
-    // todo remove next 2 lines
-    await browser.close();
-    return;
+    const csvStream = csvWriter();
+    await mkdirp('./dist');
+    csvStream.pipe(fs.createWriteStream('./dist/products_data.csv'));
+    console.log('Tring to save each product data...');
 
-    // todo extract productIds from page (and navigate to the next page if needed)
-    for (let count = 1; count < 10; count++) {
-        console.log(`count: ${count}`); // todo rework
-        await getNextProduct({ go, productId });
+    for (let productId of productIds) {
+        console.log(`Processing product with id: ${productId}`);
+        await saveProductData({ go, productId, csvStream });
     }
+
+    csvStream.end();
 
     await browser.close();
     console.log('Done!');
