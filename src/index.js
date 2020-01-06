@@ -90,10 +90,11 @@ const saveProductData = async ({ go, productId, csvStream }) => {
 };
 
 const main = async () => {
-    // todo use existing chrome for debugging
+    // links about using existing chrome for debugging
     // https://github.com/puppeteer/puppeteer/issues/288#issuecomment-322822607
     // https://github.com/puppeteer/puppeteer/issues/288#issuecomment-506925722
     const browser = await puppeteer.launch({
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
         headless: true // todo use config
     });
     const page = await browser.newPage();
