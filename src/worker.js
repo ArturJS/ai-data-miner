@@ -1,24 +1,31 @@
+const path = require('path');
 const fs = require('fs');
-const { promisify } = require('util');
-const mkdirp = promisify(require('mkdirp'));
+const commandLineArgs = require('command-line-args');
 const puppeteer = require('puppeteer');
 const csvWriter = require('csv-write-stream');
 
-// todo use config for baseUrl
-
-const catchPossibleError = async fn => {
-    try {
-        return await fn();
-    } catch (err) {
-        console.log({
-            err
-        });
+const workerData = commandLineArgs([
+    {
+        name: 'baseUrl',
+        type: String
+    },
+    {
+        name: 'firstPageNumber',
+        type: Number
+    },
+    {
+        name: 'lastPageNumber',
+        type: Number
     }
+]);
+
+const log = message => {
+    console.log(message);
 };
 
 const getTextContent = async ({ page, element }) => {
     const text = await page.evaluate(element => element.textContent, element);
-    console.log('Text content: ' + text);
+    log('Text content: ' + text);
     return text;
 };
 
@@ -29,21 +36,19 @@ const $ = {
     description: 'span.h3 + div'
 };
 
-const saveProductData = async ({ go, productId, csvStream }) => {
-    console.log(`Opening product page ${productId}`);
+const saveProductData = async ({ go, productId, baseUrl, csvStream }) => {
+    log(`Opening product page ${productId}`);
 
-    const page = await go(
-        `https://www.citilink.ru/catalog/mobile/cell_phones/${productId}`
-    );
+    const page = await go(`${baseUrl}/${productId}`);
 
     const savePreview = async () => {
         await page.waitForSelector($.productPreview, {
-            timeout: 7000
+            timeout: 50000
         });
 
         const element = await page.$($.productPreview);
 
-        // vipe out some shit of the screen
+        // wipe out the shit of the screen
         await page.evaluate(() => {
             var someShittyElement = document.querySelector(
                 '.best-opinion-window__content'
@@ -56,8 +61,9 @@ const saveProductData = async ({ go, productId, csvStream }) => {
                 );
         });
 
-        console.log(`Saving product preview by id ${productId}`);
+        log(`Saving product preview by id ${productId}`);
         await element.screenshot({
+            // todo figure out: may be it should be in the main thread?
             path: `dist/images/${productId}.png`
         });
     };
@@ -73,20 +79,20 @@ const saveProductData = async ({ go, productId, csvStream }) => {
         };
     };
 
-    const productData = await catchPossibleError(async () => {
+    try {
         await savePreview();
 
         const productInfo = await getProductInfo();
 
-        return {
+        const productData = {
             productId,
             ...productInfo
         };
-    });
 
-    console.log(`Saving productData to csv file:`);
-    console.dir(productData);
-    csvStream.write(productData);
+        csvStream.write(productData);
+    } catch (err) {
+        log({ err });
+    }
 };
 
 const crawlPages = async ({
@@ -94,6 +100,7 @@ const crawlPages = async ({
     lastPageNumber,
     go,
     page,
+    baseUrl,
     csvStream
 }) => {
     for (
@@ -101,12 +108,12 @@ const crawlPages = async ({
         pageNumber <= lastPageNumber;
         pageNumber++
     ) {
-        const baseUrl = `https://www.citilink.ru/catalog/mobile/cell_phones/?p=${pageNumber}`;
+        const pageUrl = `${baseUrl}?p=${pageNumber}`;
 
-        console.log(`Navigating to ${baseUrl}`);
-        await go(baseUrl);
+        log(`Navigating to ${pageUrl}`);
+        await go(pageUrl, { waitUntil: 'domcontentloaded' });
 
-        console.log(`Trying to get productIds from page ${pageNumber}...`);
+        log(`Trying to get productIds from page ${pageNumber}...`);
         const productIds = await page.evaluate(() => {
             return [
                 ...document.querySelectorAll(
@@ -115,63 +122,85 @@ const crawlPages = async ({
             ].map(element => element.getAttribute('data-product-id'));
         });
 
-        console.log('ProductIds received:');
-        console.dir(productIds);
-
-        csvStream.pipe(fs.createWriteStream('./dist/products_data.csv'));
-        console.log('Tring to save each product data...');
+        log('ProductIds received:');
+        log(JSON.stringify(productIds, null, 2));
+        log('Tring to save each product data...');
 
         for (let productId of productIds) {
-            console.log(`Processing product with id: ${productId}`);
-            await saveProductData({ go, productId, csvStream });
+            log(`Processing product with id: ${productId}`);
+            await saveProductData({ go, productId, baseUrl, csvStream });
         }
     }
 };
 
-const main = async () => {
+const main = async workerData => {
+    console.log({ workerData });
+
+    const {
+        baseUrl,
+        firstPageNumber,
+        lastPageNumber,
+        headless = true
+    } = workerData;
     // links about using existing chrome for debugging
     // https://github.com/puppeteer/puppeteer/issues/288#issuecomment-322822607
     // https://github.com/puppeteer/puppeteer/issues/288#issuecomment-506925722
     const browser = await puppeteer.launch({
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        headless: true // todo use config
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--window-size=1920,1040'
+        ],
+        headless
     });
     const page = await browser.newPage();
-    const go = async url => {
-        await page.goto(url, { waitUntil: 'networkidle0' });
+    const go = async (url, { waitUntil = 'networkidle2' } = {}) => {
+        console.log({ waitUntil });
+        await page.goto(url, {
+            waitUntil,
+            timeout: 120000 /* 2 minutes just to overcome some weird shit */
+        });
 
         return page;
     };
 
-    const baseUrl = 'https://www.citilink.ru/catalog/mobile/cell_phones/?p=1';
+    log(`Navigating to ${baseUrl}`);
+    await go(baseUrl, { waitUntil: 'domcontentloaded' });
 
-    console.log(`Navigating to ${baseUrl}`);
-    await go(baseUrl);
-
-    const csvStream = csvWriter();
-    await mkdirp('./dist/images');
-
-    const lastPageNumber = await page.evaluate(() => {
+    const lastPageNumberInCatalog = await page.evaluate(() => {
         return +document
             .querySelector('.page_listing li.last a')
             .getAttribute('data-page');
     });
 
+    const csvStream = csvWriter();
+
+    csvStream.pipe(
+        fs.createWriteStream(
+            path.resolve(__dirname, '../dist/products_data.csv'),
+            {
+                // append only in order to avoid locks on the file
+                flags: 'a'
+            }
+        )
+    );
+
     await crawlPages({
-        firstPageNumber: 1,
-        lastPageNumber,
+        firstPageNumber,
+        lastPageNumber: Math.min(lastPageNumber, lastPageNumberInCatalog),
         go,
         page,
+        baseUrl,
         csvStream
     });
 
-    csvStream.end();
-
     await browser.close();
-    console.log('Done!');
+
+    csvStream.end();
+    log('Done!');
 };
 
-main().catch(err => {
-    console.log('Some shit happened... See error details:');
-    console.log(err);
+main(workerData).catch(err => {
+    log('Some shit happened... See error details:');
+    log(err);
 });
