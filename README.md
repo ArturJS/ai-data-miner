@@ -15,11 +15,13 @@ There will available the next data: `product_data.csv` and `images` folder with 
 
 - [x] Add support for Docker run
   
-- [ ] Go to next page of catalog if there are any products available 
+- [x] Go to next page of catalog if there are any products available 
    
-- [ ] and if we not yet exceeded max product count (add product count as a parameter in configuration)
-
 - [ ] Add ability for parallel download in order to speed-up the process
+
+- [ ] Add parameter `maxProductsCount` in order to not download extra data
+
+- [ ] Add `config.js` with `dotenv-safe`
 
 - [ ] Add ability to configure `url` and page selectors from `process.argv`
 
