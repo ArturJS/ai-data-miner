@@ -1,18 +1,26 @@
-const { workerData, parentPort } = require('worker_threads');
+const path = require('path');
+const fs = require('fs');
+const commandLineArgs = require('command-line-args');
 const puppeteer = require('puppeteer');
+const csvWriter = require('csv-write-stream');
+
+const workerData = commandLineArgs([
+    {
+        name: 'baseUrl',
+        type: String
+    },
+    {
+        name: 'firstPageNumber',
+        type: Number
+    },
+    {
+        name: 'lastPageNumber',
+        type: Number
+    }
+]);
 
 const log = message => {
-    parentPort.postMessage(message);
-};
-
-const catchPossibleError = async fn => {
-    try {
-        return await fn();
-    } catch (err) {
-        log({
-            err
-        });
-    }
+    console.log(message);
 };
 
 const getTextContent = async ({ page, element }) => {
@@ -28,19 +36,19 @@ const $ = {
     description: 'span.h3 + div'
 };
 
-const saveProductData = async ({ go, productId, baseUrl }) => {
+const saveProductData = async ({ go, productId, baseUrl, csvStream }) => {
     log(`Opening product page ${productId}`);
 
     const page = await go(`${baseUrl}/${productId}`);
 
     const savePreview = async () => {
         await page.waitForSelector($.productPreview, {
-            timeout: 7000
+            timeout: 50000
         });
 
         const element = await page.$($.productPreview);
 
-        // vipe out some shit of the screen
+        // wipe out the shit of the screen
         await page.evaluate(() => {
             var someShittyElement = document.querySelector(
                 '.best-opinion-window__content'
@@ -55,7 +63,7 @@ const saveProductData = async ({ go, productId, baseUrl }) => {
 
         log(`Saving product preview by id ${productId}`);
         await element.screenshot({
-            // todo figure out: may be in main thread?
+            // todo figure out: may be it should be in the main thread?
             path: `dist/images/${productId}.png`
         });
     };
@@ -71,18 +79,20 @@ const saveProductData = async ({ go, productId, baseUrl }) => {
         };
     };
 
-    const productData = await catchPossibleError(async () => {
+    try {
         await savePreview();
 
         const productInfo = await getProductInfo();
 
-        return {
+        const productData = {
             productId,
             ...productInfo
         };
-    });
 
-    parentPort.postMessage(productData);
+        csvStream.write(productData);
+    } catch (err) {
+        log({ err });
+    }
 };
 
 const crawlPages = async ({
@@ -90,17 +100,18 @@ const crawlPages = async ({
     lastPageNumber,
     go,
     page,
-    baseUrl
+    baseUrl,
+    csvStream
 }) => {
     for (
         let pageNumber = firstPageNumber;
         pageNumber <= lastPageNumber;
         pageNumber++
     ) {
-        baseUrl = `${baseUrl}?p=${pageNumber}`;
+        const pageUrl = `${baseUrl}?p=${pageNumber}`;
 
-        log(`Navigating to ${baseUrl}`);
-        await go(baseUrl);
+        log(`Navigating to ${pageUrl}`);
+        await go(pageUrl, { waitUntil: 'domcontentloaded' });
 
         log(`Trying to get productIds from page ${pageNumber}...`);
         const productIds = await page.evaluate(() => {
@@ -117,33 +128,44 @@ const crawlPages = async ({
 
         for (let productId of productIds) {
             log(`Processing product with id: ${productId}`);
-            await saveProductData({ go, productId, baseUrl });
+            await saveProductData({ go, productId, baseUrl, csvStream });
         }
     }
 };
 
-const main = async ({
-    baseUrl,
-    firstPageNumber,
-    lastPageNumber,
-    headless = true
-}) => {
+const main = async workerData => {
+    console.log({ workerData });
+
+    const {
+        baseUrl,
+        firstPageNumber,
+        lastPageNumber,
+        headless = true
+    } = workerData;
     // links about using existing chrome for debugging
     // https://github.com/puppeteer/puppeteer/issues/288#issuecomment-322822607
     // https://github.com/puppeteer/puppeteer/issues/288#issuecomment-506925722
     const browser = await puppeteer.launch({
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--window-size=1920,1040'
+        ],
         headless
     });
     const page = await browser.newPage();
-    const go = async url => {
-        await page.goto(url, { waitUntil: 'networkidle0' });
+    const go = async (url, { waitUntil = 'networkidle2' } = {}) => {
+        console.log({ waitUntil });
+        await page.goto(url, {
+            waitUntil,
+            timeout: 120000 /* 2 minutes just to overcome some weird shit */
+        });
 
         return page;
     };
 
     log(`Navigating to ${baseUrl}`);
-    await go(baseUrl);
+    await go(baseUrl, { waitUntil: 'domcontentloaded' });
 
     const lastPageNumberInCatalog = await page.evaluate(() => {
         return +document
@@ -151,15 +173,30 @@ const main = async ({
             .getAttribute('data-page');
     });
 
+    const csvStream = csvWriter();
+
+    csvStream.pipe(
+        fs.createWriteStream(
+            path.resolve(__dirname, '../dist/products_data.csv'),
+            {
+                // append only in order to avoid locks on the file
+                flags: 'a'
+            }
+        )
+    );
+
     await crawlPages({
         firstPageNumber,
         lastPageNumber: Math.min(lastPageNumber, lastPageNumberInCatalog),
         go,
         page,
-        baseUrl
+        baseUrl,
+        csvStream
     });
 
     await browser.close();
+
+    csvStream.end();
     log('Done!');
 };
 
