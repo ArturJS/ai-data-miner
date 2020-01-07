@@ -23,7 +23,7 @@ const getTextContent = async ({ page, element }) => {
 };
 
 const $ = {
-    productPreviews: '.mCS_img_loaded',
+    productPreview: '.image_gallery .full_content img',
     title: 'h1',
     characteristics: '.short_description',
     description: 'span.h3 + div'
@@ -36,29 +36,30 @@ const saveProductData = async ({ go, productId, csvStream }) => {
         `https://www.citilink.ru/catalog/mobile/cell_phones/${productId}`
     );
 
-    const savePreviews = async () => {
-        await page.waitForSelector($.productPreviews, {
+    const savePreview = async () => {
+        await page.waitForSelector($.productPreview, {
             timeout: 7000
         });
 
-        const elements = await page.$$($.productPreviews);
-        let previewNumber = 0;
+        const element = await page.$($.productPreview);
 
-        for (let element of elements) {
-            previewNumber++;
-            console.log(
-                `Saving product preview ${JSON.stringify({
-                    productId,
-                    previewNumber
-                })}`
+        // vipe out some shit of the screen
+        await page.evaluate(() => {
+            var someShittyElement = document.querySelector(
+                '.best-opinion-window__content'
             );
-            const productFolderPath = `./dist/images/${productId}/`;
-            await mkdirp(productFolderPath);
-            await element.screenshot({
-                // todo save big resolution picture
-                path: `${productFolderPath}/${previewNumber}.png`
-            });
-        }
+
+            someShittyElement &&
+                someShittyElement.parentElement &&
+                someShittyElement.parentElement.parentElement.removeChild(
+                    someShittyElement.parentElement
+                );
+        });
+
+        console.log(`Saving product preview by id ${productId}`);
+        await element.screenshot({
+            path: `dist/images/${productId}.png`
+        });
     };
 
     const getProductInfo = async () => {
@@ -73,7 +74,7 @@ const saveProductData = async ({ go, productId, csvStream }) => {
     };
 
     const productData = await catchPossibleError(async () => {
-        await savePreviews();
+        await savePreview();
 
         const productInfo = await getProductInfo();
 
@@ -88,8 +89,53 @@ const saveProductData = async ({ go, productId, csvStream }) => {
     csvStream.write(productData);
 };
 
+const crawlPages = async ({
+    firstPageNumber = 1,
+    lastPageNumber,
+    go,
+    page,
+    csvStream
+}) => {
+    for (
+        let pageNumber = firstPageNumber;
+        pageNumber <= lastPageNumber;
+        pageNumber++
+    ) {
+        const baseUrl = `https://www.citilink.ru/catalog/mobile/cell_phones/?p=${pageNumber}`;
+
+        console.log(`Navigating to ${baseUrl}`);
+        await go(baseUrl);
+
+        console.log(`Trying to get productIds from page ${pageNumber}...`);
+        const productIds = await page.evaluate(() => {
+            return [
+                ...document.querySelectorAll(
+                    '.block_data__gtm-js a[data-product-id]'
+                )
+            ].map(element => element.getAttribute('data-product-id'));
+        });
+
+        console.log('ProductIds received:');
+        console.dir(productIds);
+
+        csvStream.pipe(fs.createWriteStream('./dist/products_data.csv'));
+        console.log('Tring to save each product data...');
+
+        for (let productId of productIds) {
+            console.log(`Processing product with id: ${productId}`);
+            await saveProductData({ go, productId, csvStream });
+        }
+    }
+};
+
 const main = async () => {
-    const browser = await puppeteer.launch();
+    // links about using existing chrome for debugging
+    // https://github.com/puppeteer/puppeteer/issues/288#issuecomment-322822607
+    // https://github.com/puppeteer/puppeteer/issues/288#issuecomment-506925722
+    const browser = await puppeteer.launch({
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        headless: true // todo use config
+    });
     const page = await browser.newPage();
     const go = async url => {
         await page.goto(url, { waitUntil: 'networkidle0' });
@@ -97,29 +143,27 @@ const main = async () => {
         return page;
     };
 
-    const baseUrl = 'https://www.citilink.ru/catalog/mobile/cell_phones/';
+    const baseUrl = 'https://www.citilink.ru/catalog/mobile/cell_phones/?p=1';
 
     console.log(`Navigating to ${baseUrl}`);
     await go(baseUrl);
 
-    console.log(`Trying to get productIds...`);
-    const productIds = await page.evaluate(`
-    [...document.querySelectorAll('.block_data__gtm-js a[data-product-id]')]
-      .map((element) => element.getAttribute('data-product-id'));
-    `);
-
-    console.log('ProductIds received:');
-    console.dir(productIds);
-
     const csvStream = csvWriter();
     await mkdirp('./dist/images');
-    csvStream.pipe(fs.createWriteStream('./dist/products_data.csv'));
-    console.log('Tring to save each product data...');
 
-    for (let productId of productIds) {
-        console.log(`Processing product with id: ${productId}`);
-        await saveProductData({ go, productId, csvStream });
-    }
+    const lastPageNumber = await page.evaluate(() => {
+        return +document
+            .querySelector('.page_listing li.last a')
+            .getAttribute('data-page');
+    });
+
+    await crawlPages({
+        firstPageNumber: 1,
+        lastPageNumber,
+        go,
+        page,
+        csvStream
+    });
 
     csvStream.end();
 
