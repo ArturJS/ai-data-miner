@@ -12,11 +12,11 @@ There will available the next data: `product_data.csv` and `images` folder with 
 
 ### TODO:
 - [x] Save big resolution product preview image
+
+- [x] Add support for Docker run
   
 - [ ] Go to next page of catalog if there are any products available 
    and if we not yet exceeded max product count (add product count as a parameter in configuration)
-
-- [ ] Add support for Docker run
 
 - [ ] Add ability to configure `url` and page selectors from `process.argv`
 
