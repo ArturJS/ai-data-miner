@@ -104,31 +104,45 @@ const main = async () => {
         return page;
     };
 
-    const baseUrl = 'https://www.citilink.ru/catalog/mobile/cell_phones/';
+    const baseUrl = 'https://www.citilink.ru/catalog/mobile/cell_phones/?p=1';
 
     console.log(`Navigating to ${baseUrl}`);
     await go(baseUrl);
 
-    console.log(`Trying to get productIds...`);
-    const productIds = await page.evaluate(() => {
-        return [
-            ...document.querySelectorAll(
-                '.block_data__gtm-js a[data-product-id]'
-            )
-        ].map(element => element.getAttribute('data-product-id'));
-    });
-
-    console.log('ProductIds received:');
-    console.dir(productIds);
-
     const csvStream = csvWriter();
     await mkdirp('./dist/images');
-    csvStream.pipe(fs.createWriteStream('./dist/products_data.csv'));
-    console.log('Tring to save each product data...');
 
-    for (let productId of productIds) {
-        console.log(`Processing product with id: ${productId}`);
-        await saveProductData({ go, productId, csvStream });
+    const lastPageNumber = await page.evaluate(() => {
+        return +document
+            .querySelector('.page_listing li.last a')
+            .getAttribute('data-page');
+    });
+
+    for (let pageNumber = 1; pageNumber <= lastPageNumber; pageNumber++) {
+        const baseUrl = `https://www.citilink.ru/catalog/mobile/cell_phones/?p=${pageNumber}`;
+
+        console.log(`Navigating to ${baseUrl}`);
+        await go(baseUrl);
+
+        console.log(`Trying to get productIds from page ${pageNumber}...`);
+        const productIds = await page.evaluate(() => {
+            return [
+                ...document.querySelectorAll(
+                    '.block_data__gtm-js a[data-product-id]'
+                )
+            ].map(element => element.getAttribute('data-product-id'));
+        });
+
+        console.log('ProductIds received:');
+        console.dir(productIds);
+
+        csvStream.pipe(fs.createWriteStream('./dist/products_data.csv'));
+        console.log('Tring to save each product data...');
+
+        for (let productId of productIds) {
+            console.log(`Processing product with id: ${productId}`);
+            await saveProductData({ go, productId, csvStream });
+        }
     }
 
     csvStream.end();
