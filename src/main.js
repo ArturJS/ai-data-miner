@@ -34,15 +34,21 @@ const main = async () => {
 
     console.log(`cpuCores: ${cpuCores}`);
 
-    for (let i = 0; i < cpuCores; i++) {
-        const firstPageNumber = i * 10 + 1;
+    spawnWorker({
+        baseUrl: 'https://www.citilink.ru/catalog/mobile/cell_phones/',
+        firstPageNumber: 4,
+        lastPageNumber: 31
+    });
 
-        spawnWorker({
-            baseUrl: 'https://www.citilink.ru/catalog/mobile/cell_phones/',
-            firstPageNumber,
-            lastPageNumber: firstPageNumber + 9
-        });
-    }
+    // for (let i = 0; i < cpuCores; i++) {
+    //     const firstPageNumber = i * 10 + 1;
+
+    //     spawnWorker({
+    //         baseUrl: 'https://www.citilink.ru/catalog/mobile/cell_phones/',
+    //         firstPageNumber,
+    //         lastPageNumber: firstPageNumber + 9
+    //     });
+    // }
 };
 
 main().catch(err => {

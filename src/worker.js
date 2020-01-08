@@ -149,7 +149,8 @@ const main = async workerData => {
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
-            '--window-size=1920,1040'
+            '--window-size=1920,1040',
+            '--proxy-server=socks5://3.137.51.198:9150'
         ],
         headless
     });
