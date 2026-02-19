@@ -27,7 +27,7 @@
     "command-line-args": "^5.1.1",
     "csv-write-stream": "^2.0.0",
     "physical-cpu-count": "^2.0.0",
-    "puppeteer": "^2.0.0",
+    "puppeteer": "^24.37.5",
     "spawnd": "^4.4.0"
   }
 }
